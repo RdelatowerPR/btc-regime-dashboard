@@ -1,0 +1,31 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+dist-server
+*.local
+
+# Local SQLite database (regenerated via npm run seed)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Environment — holds CoinGecko / Coinalyze / Velo keys. Never commit.
+.env
+.env.local
+
+# Claude Code
+.claude/
