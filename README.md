@@ -43,6 +43,8 @@ Run `npm run backtest` to reproduce. Median 90/180-day forward BTC returns, 2018
 | Puell multiple | bottom 5% | +10.1% | +67.1% | 59% |
 | Composite score | top 5% | +10.6% | +41.4% | 56% |
 | Net liquidity 90d chg | decile spread | — | — | +36pp D1→D10 |
+| **Leverage axis** | decile spread | — | — | **−21pp** D1→D10 |
+| **OI heat ≥ 2× / 3×** | see below | −4.7% / −12.5% **at 30d** | — | — |
 
 Realized price is the strongest signal in the set — which supports the emphasis Blockworks'
 "Bottom Signals" places on it, **but only in the tail.** Across deciles it is unremarkable; the
@@ -106,7 +108,7 @@ All free. No paid subscription is required for anything on the dashboard.
 | **FRED** | WALCL, WTREGEN, RRPONTSYD, BAMLH0A0HYM2, DTWEXBGS, DFII10, NFCI | No | `fredgraph.csv`; one series per request (multi-id returns a ZIP) |
 | **DefiLlama** | Aggregate stablecoin float | No | USD-pegged only |
 | **Pendle** | sUSDe term structure | No | Falls back from the sUSDe dashboard's API |
-| **Coinalyze / Velo** | Open-interest history | **Yes (free)** | Required for a usable leverage panel |
+| **Coinalyze** | Open-interest + funding history, daily from 2022-06-18 | **Yes (free)** | Required for a usable leverage panel |
 | **OKX / CoinGecko** | Open interest fallback | No | 180 days / today-only |
 
 ### Deriving realized price without a subscription
@@ -128,19 +130,19 @@ published in "Bottom Signals": this yields **$52,869** for the same date.
 block). Never call them directly — reach their data through an aggregator. CoinGecko's
 `/derivatives/exchanges` reports Binance's open interest in BTC terms without touching Binance.
 
-### Open interest: the one real gap
+### Open interest
 
 The 1000x overheat signal needs **coin-denominated** open interest, because USD open interest rises
 mechanically with price. We derive it as `oi_usd / btc_price`, which means any USD source works.
 
-Without a Coinalyze or Velo key the panel falls back to a 180-day OKX window plus daily CoinGecko
-snapshots — enough to display, not enough for meaningful percentiles. **Both keys are free and take
-about two minutes:**
+Without a Coinalyze key the panel falls back to a 180-day OKX window plus daily CoinGecko
+snapshots — enough to display, not enough for meaningful percentiles. A Coinalyze key is free
+(<https://coinalyze.net/> → Account → API → set `COINALYZE_API_KEY` in `.env`, then `npm run seed`)
+and yields 1,500 days of aggregated open interest plus funding across 8 venues.
 
-- Coinalyze — <https://coinalyze.net/> → Account → API → set `COINALYZE_API_KEY` in `.env`
-- Velo — <https://velodata.app/> → set `VELO_API_KEY` in `.env`
+Velo is the tool the 1000x hosts actually use on air, but it is no longer free, so it is not wired up.
 
-Then `npm run seed`. The leverage axis stays flagged unreliable in the UI until there are 365+ days.
+The leverage axis stays flagged unreliable in the UI until there are 365+ days of history.
 
 ---
 
@@ -215,30 +217,67 @@ It is still four data points extrapolated forward. A zone of interest, not a for
 
 ### The OI heat ratio
 
-```
-heat = %Δ OI(coins) over n days ÷ %Δ price over n days
-```
+Transcribed from the source episode rather than reconstructed —
+[1000x, "How To Trade Using Open Interest & Funding Rates"](https://www.youtube.com/watch?v=38M4dwHvlwA).
+Jonah Van Bourg, verbatim:
 
-A reading of 2.0 means open interest grew twice as fast as price: the move is carried by new
-leverage rather than new spot demand.
+> you basically take the number of coins and you divide it by the price movement. And if that ratio
+> is like two or three, then you're in a danger zone.
+
+The sentence leaves the units ambiguous; his two worked examples pin them down:
+
+| Leg | Price | OI (coins) | Ratio | His read |
+| --- | ----- | ---------- | ----: | -------- |
+| Apr→May 2025 | +40% | 170k → 185k (+8.8%) | **0.22** | "open interest doesn't go crazy" |
+| from 18 May | +8.8% | 185k → 225k (+21.6%) | **2.45** | the danger case |
+
+2.45 lands squarely in "like two or three", so the ratio is **% change in coin-denominated OI ÷ %
+change in price** — dimensionless, which is also the only reading under which a fixed 2–3 threshold
+travels across price levels. (Reading it as "thousands of coins per percent" gives 0.38 and 4.53,
+which fits his wording far worse.)
+
+Two further details from the same segment:
+
+- Open interest is counted *"in bitcoin terms across all exchanges"* — aggregated and
+  coin-denominated.
+- It is measured **per rally leg**, not over a fixed lookback: his legs ran about two months and
+  about one week. Hence the ZigZag swing detector in `stats.ts`; the fixed 7/14/30-day windows are
+  kept only as supporting context.
 
 Only defined while price is **advancing** by more than 1%. During a drawdown the ratio flips sign
-and stops meaning anything; near a flat tape the denominator explodes. Undefined is more honest than
-a spurious number.
+and stops meaning anything; near a flat tape the denominator explodes.
 
-The 2× and 3× reference lines are drawn as discussion reference points, **not validated
-thresholds** — there is not yet enough open-interest history to backtest them. The percentile
-readout is the honest measure until the history fills in.
+**His thresholds validate — at ~30 days, not 90:**
+
+| OI heat (rally leg) | Median 30d forward | Median 90d | n |
+| ------------------- | -----------------: | ---------: | -: |
+| below 2× | **+2.0%** | +5.8% | 1,313 |
+| ≥ 2× (his danger zone) | **−4.7%** | +3.6% | 37 |
+| ≥ 3× | **−12.5%** | +5.3% | 24 |
+
+Monotonic in the right direction, and the effect washes out entirely by 90 days — exactly
+consistent with how it is framed on air ("maybe lighten up", "wait a little bit for it to come
+off"). It is a tactical positioning signal with a horizon of weeks, not a directional call. An
+earlier 90-day-only backtest made it look useless, which is what prompted testing the shorter
+horizon.
+
+On funding, same episode: *"I don't actually use funding at all anymore except to confirm direction
+of open interest."* A funding spike alongside rising OI implies aggressive taker longs rather than
+balanced two-way flow, so it is shown as a confirmation overlay rather than scored independently.
 
 ---
 
 ## Deployment
 
-Mirrors the sUSDe dashboard: Raspberry Pi behind a Cloudflare Tunnel, `protocol: http2` (QUIC fails
-on the Pi's small UDP buffer). Use a second hostname pointing at `http://localhost:3002`.
+Runs on Windows, started at logon by the `CryptoDashboards` scheduled task alongside the sUSDe
+dashboard. Control scripts, the desktop toggle and the optional Cloudflare Tunnel setup live in
+`../dashboards-control` — see its README.
 
 The daily cron runs at **06:30 UTC** — after FRED's overnight publication window, and late enough
 that the previous UTC day is closed everywhere.
+
+Note that `npm run prod` is bash syntax (`NODE_ENV=production tsx ...`) and fails on Windows. The
+control scripts set the variable properly and call `node --import tsx server/index.ts` instead.
 
 ---
 
