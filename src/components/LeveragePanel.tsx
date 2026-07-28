@@ -136,7 +136,11 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
             <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
             <XAxis dataKey="date" minTickGap={60} stroke={C.textFaint}
               tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
-            <YAxis yAxisId="heat" domain={[-3, 5]} stroke={C.textFaint}
+            {/* allowDataOverflow is required: without it Recharts treats the
+                domain as a hint and stretches it to fit outliers, which both
+                buries the 2x/3x lines and produces unrounded tick labels. */}
+            <YAxis yAxisId="heat" domain={[-3, 5]} allowDataOverflow
+              ticks={[-3, -2, -1, 0, 1, 2, 3, 4, 5]} stroke={C.textFaint}
               tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }}
               label={{ value: "OI heat (leg)", angle: -90, position: "insideLeft",
                 style: { fontSize: 10, fontFamily: FONT.mono, fill: C.textDim } }} />
