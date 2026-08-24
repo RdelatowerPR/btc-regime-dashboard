@@ -456,11 +456,9 @@ export function computeSignals() {
   // from dominating through sheer scale.
 
   const pctMvrvZ = expandingPercentile(mvrvZ, CONFIG.minSample);
-  const pctRealized = expandingPercentile(realizedRatio, CONFIG.minSample);
   const pctMayer = expandingPercentile(mayer, CONFIG.minSample);
   const ndxSeries = dates.map((d) => ndxRsi.get(d) ?? null);
   const goldSeries = dates.map((d) => goldRsi.get(d) ?? null);
-  const pctNdx = expandingPercentile(ndxSeries, CONFIG.minSample);
   const pctGold = expandingPercentile(goldSeries, CONFIG.minSample);
 
   const pctOiMcap = expandingPercentile(oiMcapRatio, 60);

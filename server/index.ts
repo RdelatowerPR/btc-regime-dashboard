@@ -3,7 +3,6 @@
 // Port 3002 — 3001 belongs to the sUSDe term-structure dashboard.
 
 import express from "express";
-import cors from "cors";
 import cron from "node-cron";
 import { existsSync } from "fs";
 import { resolve } from "path";
@@ -12,6 +11,11 @@ import { fullSync } from "./ingest.js";
 import { computeBottomBand, CONFIG, CYCLE_LOWS, OI_HEAT_SPEC } from "./signals.js";
 import { ERAS } from "./backtest.js";
 import { loadEnv } from "./sources/util.js";
+import {
+  PUBLIC_CACHE_CONTROL,
+  installPublicSecurity,
+  isTrustedLocalAdminRequest,
+} from "./security.js";
 
 loadEnv();
 
@@ -20,8 +24,9 @@ const app = express();
 // supervisor that assigns a port, it exports PORT for Vite, and the API would
 // otherwise try to bind the same one. Vite proxies /api here (see vite.config).
 const PORT = Number(process.env.API_PORT ?? 3002);
+const PUBLIC_ORIGIN = "https://btc.raulantonio.xyz";
 
-app.use(cors());
+installPublicSecurity(app, PUBLIC_ORIGIN);
 app.use(express.json());
 
 // ── HELPERS ────────────────────────────────────────────────────────────────
@@ -252,7 +257,8 @@ app.get(
 );
 
 let syncing = false;
-app.post("/api/sync", async (_req, res) => {
+app.post("/api/sync", async (req, res) => {
+  if (!isTrustedLocalAdminRequest(req)) return res.sendStatus(404);
   if (syncing) return res.status(409).json({ error: "sync already in progress" });
   syncing = true;
   try {
@@ -269,9 +275,14 @@ app.post("/api/sync", async (_req, res) => {
 
 const distDir = resolve(import.meta.dirname ?? ".", "../dist");
 if (process.env.NODE_ENV === "production" && existsSync(distDir)) {
-  app.use(express.static(distDir));
+  app.use(express.static(distDir, {
+    setHeaders: (res) => res.setHeader("Cache-Control", PUBLIC_CACHE_CONTROL),
+  }));
   // SPA fallback for anything that isn't an API route.
-  app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(resolve(distDir, "index.html")));
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.setHeader("Cache-Control", PUBLIC_CACHE_CONTROL);
+    res.sendFile(resolve(distDir, "index.html"));
+  });
 }
 
 // ── CRON ───────────────────────────────────────────────────────────────────
@@ -288,9 +299,12 @@ cron.schedule("30 6 * * *", async () => {
   } finally {
     syncing = false;
   }
-});
+}, { timezone: "UTC" });
 
-app.listen(PORT, () => {
+// Bind loopback only. Public access is served by the Cloudflare tunnel,
+// which connects from this same host to localhost:3002. This removes direct
+// LAN exposure; it does not claim to isolate the service from local processes.
+app.listen(PORT, "127.0.0.1", () => {
   console.log(`BTC Regime Monitor API on http://localhost:${PORT}`);
   console.log(`  Daily sync scheduled for 06:30 UTC.`);
 });

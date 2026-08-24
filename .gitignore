@@ -29,3 +29,6 @@ data/*.db-shm
 
 # Claude Code
 .claude/
+
+# Local safety backups
+*.bak-*-preLoopbackBind
