@@ -6,8 +6,11 @@ term structure, and macro liquidity — aggregated into a two-axis regime view.
 Every threshold in the dashboard is backtested, and **the indicators that failed are labelled as
 failed rather than quietly dropped.**
 
-Companion to the [sUSDe Term Structure Dashboard](../susdeDashboard) (which runs on port 3001;
-this one uses 3002 and can read its API).
+**Operators and coding agents:** read `AGENTS.md` before changing runtime, security, deployment,
+or data behavior. `CLAUDE.md` imports that same authority for Claude Code.
+
+Companion to the [sUSDe Term Structure Dashboard](https://github.com/RdelatowerPR/susde-term-structure-dashboard)
+(which runs on port 3001; this one uses 3002 and can read its API).
 
 ---
 
@@ -270,8 +273,20 @@ balanced two-way flow, so it is shown as a confirmation overlay rather than scor
 ## Deployment
 
 Runs on Windows, started at logon by the `CryptoDashboards` scheduled task alongside the sUSDe
-dashboard. Control scripts, the desktop toggle and the optional Cloudflare Tunnel setup live in
-`../dashboards-control` — see its README.
+dashboard and checked again hourly. The production origin binds only to `127.0.0.1:3002`; do not
+widen it to `0.0.0.0` or `::`. The automatic `cloudflared` Windows service is the only public path
+and maps `btc.raulantonio.xyz` to that loopback origin. Research and Pons are not tunnel-published.
+
+Control scripts, the desktop toggle, the active-tunnel description, and exact recovery/security
+checks live in `../dashboards-control`; use its `OPERATIONS.md` rather than restarting unrelated
+services. Manual sync is an operator action and must be sent directly from this host:
+
+```powershell
+Invoke-WebRequest -Method Post -Uri http://127.0.0.1:3002/api/sync `
+  -Headers @{ 'X-Local-Admin' = '1' }
+```
+
+Public, proxied, LAN, and unmarked sync requests are rejected.
 
 The daily cron runs at **06:30 UTC** — after FRED's overnight publication window, and late enough
 that the previous UTC day is closed everywhere.
