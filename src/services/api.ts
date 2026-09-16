@@ -257,6 +257,16 @@ export interface StatsResponse {
   recentSyncs: { ts: string; source: string; records: number; status: string; error: string | null }[];
 }
 
+/** The live price from /api/price; null while the upstream is unreachable and nothing is cached. */
+export interface LivePrice {
+  usd: number;
+  change24h: number | null;
+  updatedAt: string;
+  fetchedAt: string;
+  source: "coingecko" | "coingecko-keyless";
+  stale: boolean;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} — ${path}`);
@@ -273,3 +283,4 @@ export const fetchMacro = (from = "2018-01-01") =>
   get<{ series: SignalRow[] }>(`/api/macro?from=${from}`);
 export const fetchBacktest = (era = "modern") => get<BacktestResponse>(`/api/backtest?era=${era}`);
 export const fetchStats = () => get<StatsResponse>("/api/stats");
+export const fetchPrice = () => get<LivePrice | null>("/api/price");

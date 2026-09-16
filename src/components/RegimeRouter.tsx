@@ -11,9 +11,11 @@
 // means with a ±10 dead zone, and logged once per as-of date so the calls can
 // be scored later. This file only draws it.
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { fetchPrice } from "../services/api";
 import type {
   LeverageResponse,
+  LivePrice,
   QuadrantKey,
   RegimeResponse,
   SignalRow,
@@ -26,6 +28,33 @@ import { QUADRANT_META } from "../regime";
 import { C, FONT, fmtNum, fmtUsd } from "../theme";
 import { AxisBar, Badge, Disclosure, MiniStat, Panel, Spark } from "./ui";
 import { RegimeMap } from "./RegimeMap";
+
+/**
+ * The live price, polled every minute while the page is open. Null until the
+ * first answer, or when the server has nothing; the tile then shows the daily
+ * close. Only the price is live: the regime, the gauges and the 7/30/90-day
+ * changes are measured from the daily data and keep that data's date.
+ */
+function useLivePrice(): LivePrice | null {
+  const [live, setLive] = useState<LivePrice | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () =>
+      fetchPrice()
+        .then((p) => {
+          if (!cancelled) setLive(p);
+        })
+        .catch(() => {});
+    tick();
+    const timer = setInterval(tick, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+  return live;
+}
+const hhmm = (iso: string) => iso.slice(11, 16);
 
 // ── formatting ──────────────────────────────────────────────────────────────
 
@@ -174,6 +203,7 @@ export function RegimeRouter({
   verdicts: VerdictsResponse | null;
 }) {
   const [days, setDays] = useState<90 | 365>(90);
+  const live = useLivePrice();
   const l = data.latest;
   const trail = data.trail;
   const v = data.verdict;
@@ -272,9 +302,23 @@ export function RegimeRouter({
                 color: C.text,
               }}
             >
-              {fmtUsd(price)}
+              {fmtUsd(live?.usd ?? price)}
+            </div>
+            <div style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textFaint, marginTop: 2 }}>
+              {live
+                ? `live · ${hhmm(live.updatedAt)} UTC · CoinGecko${live.stale ? " · feed down, last good value" : ""}`
+                : `daily close · ${l.date}`}
             </div>
             <div style={{ fontFamily: FONT.mono, fontSize: 12, color: C.textDim, marginTop: 4 }}>
+              {live?.change24h != null && (
+                <span title="change over the past 24 hours, live">
+                  <b style={{ color: dirColor(live.change24h / 100) }}>
+                    {glyph(live.change24h / 100)} {pct(live.change24h / 100)}
+                  </b>{" "}
+                  <span style={{ color: C.textFaint }}>24h</span>
+                  {" · "}
+                </span>
+              )}
               {(
                 [
                   [delta(7), "7d", "change over the past 7 days"],
@@ -295,6 +339,11 @@ export function RegimeRouter({
                 </span>
               ))}
             </div>
+            {live && (
+              <div style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textFaint, marginTop: 4 }}>
+                daily close {fmtUsd(price)} · {l.date} · the gauges and the 7d/30d/90d changes use the daily data
+              </div>
+            )}
             <div style={{ marginTop: 8 }} title="Price over the past 90 days; the last week in blue">
               <Spark values={trail.slice(-90).map((r) => r.price)} w={220} h={44} hi={7} />
             </div>

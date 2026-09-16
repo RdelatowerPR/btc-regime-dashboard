@@ -12,6 +12,7 @@ import { computeBottomBand, CONFIG, CYCLE_LOWS, OI_HEAT_SPEC } from "./signals.j
 import { ERAS } from "./backtest.js";
 import { computeQuadrants, describeVerdict, logVerdict } from "./verdict.js";
 import { loadEnv } from "./sources/util.js";
+import { getLivePrice } from "./sources/price.js";
 import {
   PUBLIC_CACHE_CONTROL,
   installPublicSecurity,
@@ -368,6 +369,12 @@ app.get(
 );
 
 let syncing = false;
+// Live price for the front-page tile: cached 60 s, one upstream call a minute at most,
+// no request input reaches the upstream (server/sources/price.ts).
+app.get("/api/price", async (_req, res) => {
+  res.json(await getLivePrice());
+});
+
 app.post("/api/sync", async (req, res) => {
   if (!isTrustedLocalAdminRequest(req)) return res.sendStatus(404);
   if (syncing) return res.status(409).json({ error: "sync already in progress" });

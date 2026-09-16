@@ -337,6 +337,18 @@ written from the live numbers instead of a fixed claim.
 
 ---
 
+## Live price on the front page (2026-09-16)
+
+The price tile is live; everything else on the page is measured once a day and dated as such.
+`GET /api/price` (`server/sources/price.ts`) returns CoinGecko's current BTC price with its 24-hour
+change, using the same key and pro host as the sUSDe dashboard when `COINGECKO_API_KEY` is set,
+keyless otherwise and keyless again if the keyed call fails. It is cached for 60 seconds server-side,
+so any number of viewers costs one upstream call a minute, a fetch in flight is shared, and when the
+upstream is down the last good value is served flagged stale (the tile says so). With nothing cached
+the tile shows the daily close with its date, as it always did. The page polls once a minute while
+open. The regime header, the gauges and the 7/30/90-day changes still use the daily data and keep its
+date; the tile prints that daily close and date under the live number so the two are never confused.
+
 ## Funding across venues, positioning and BitMEX history (2026-09-16)
 
 The funding rate in `open_interest.funding_rate` is now a **weighted aggregate across every BTC
