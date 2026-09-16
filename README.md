@@ -299,3 +299,99 @@ control scripts set the variable properly and call `node --import tsx server/ind
 ## Not investment advice
 
 Descriptive statistics on a small number of independent historical episodes.
+
+---
+
+## The daily view and the verdict log (2026-09-12)
+
+The Regime tab was rebuilt to be read at a glance rather than studied. The regime verdict leads
+at display size, every number carries its own motion (7/30/90-day deltas, a 30-day ghost marker
+on each axis bar, sparklines), the sign convention of each axis is written at the ends of its
+bar, each data source is dated on its own, and the method and evidence sit behind three closed
+disclosures at the foot of the view. The other tabs are unchanged apart from solid gridlines.
+
+**Regime rule** (`server/verdict.ts`): the signs of the 7-day means of the valuation and
+leverage scores, where a sign only changes once its mean moves beyond a ±10 dead zone. Raw daily
+signs flipped 71 times in the year to 2026-09-11; this rule changed 7 times. Strength is the
+smaller of the two means' distances from neutral (faint < 15, moderate < 50, strong beyond).
+Bump `VERDICT_RULES_VERSION` whenever the rule changes.
+
+**Verdict log** (`verdict_log` table): what the page said, written once per as-of date by
+`logVerdict()` after every sync and at server start, and never rewritten. It records the regime,
+strength, run length, price, the raw and smoothed scores, the cycle readings and the projected
+cycle-low zone as printed that day. `signals` cannot serve as this record because it is
+recomputed on every sync. `GET /api/verdicts` joins each row to `signals.fwd_30d/90d/180d` and
+summarises forward returns per regime once the windows close; the Track record disclosure on the
+Regime tab shows the same. To score the calls by hand:
+
+```sql
+SELECT v.quadrant, COUNT(*) AS days, AVG(s.fwd_90d) AS avg_fwd_90d
+FROM verdict_log v JOIN signals s ON s.date = v.signal_date
+WHERE s.fwd_90d IS NOT NULL GROUP BY v.quadrant;
+```
+
+`GET /api/stats` now also returns `freshness`, the latest row per raw table, which drives the
+per-source chips under the title. On the Evidence tab an overheat signal's top tail is judged
+by the sign it is supposed to have (losses), and the Leverage tab's threshold sentence is
+written from the live numbers instead of a fixed claim.
+
+---
+
+## Funding across venues, positioning and BitMEX history (2026-09-16)
+
+The funding rate in `open_interest.funding_rate` is now a **weighted aggregate across every BTC
+perpetual coinalyze lists** (17 exchanges), normalised to the 8-hour convention (Hyperliquid, dYdX,
+Kraken, Lighter and Coinbase quote per hour and are multiplied by 8; Deribit quotes premium only).
+Each venue counts at the **smaller of its open-interest share and its volume share**, so a book that
+prints volume its open interest cannot support, or open interest its volume cannot support (Huobi
+reports 9% of OI against 0.6% of volume), is discounted either way; books under $50M of open
+interest get no weight. Volume is converted to dollars by contract type (`margined` = `COIN` reports
+dollar notional, `STABLE` reports BTC). The old equal-weight eight-venue mean is kept as
+`funding_simple`; the two correlate 0.96. Per-venue rows live in `funding_venues`, the taker buy
+share of weighted volume in `open_interest.taker_buy`, and the OI-weighted account long share
+(Binance, Bybit) in `positioning`.
+
+**Funding enters the leverage score on a fixed ten-year scale** (`fundingLevelScore` in
+`server/signals.ts`): neutral at or under 0.01% per 8 hours, +25 at 0.02, +60 at 0.04, +100 at
+0.08, −50 at −0.02, linear between. It replaced an expanding percentile of the 2022+ history, which
+had the wrong sign because that window never saw a real extreme. Funding *change* is not scored:
+over ten years of BitMEX prints every definition of it sat within ±0.04 rank correlation of zero.
+
+**BitMEX XBTUSD funding since 2016** (`funding_bitmex`, `server/sources/bitmex.ts`, public API,
+incremental after a ~24-request backfill) is the calibration history behind that scale and gives
+the Evidence tab a 2018+ funding test (`signals.funding_7d` is the weighted aggregate where it
+exists and BitMEX before it). BitMEX is about 0.04% of open interest today; it is never the live
+reading.
+
+**Collected, not shown.** The per-venue rows, the taker buy share and the account long share are
+ingested and kept in `signals` for research, but the dashboard displays only what it scores: the
+Leverage tab shows the weighted funding reading in percent per 8 hours with its annualised
+equivalent, and the Evidence tab tests `funding_7d` alongside the older inputs (an overheat signal's
+top tail is judged by the sign it should have). A venue table and a positioning block were on the tab
+for a few hours on 2026-09-16 and came off at Raul's request: the dashboard carries the signal, the
+research note carries the analysis. Everything needed to put them back is in `/api/leverage`
+(`venues`, `positioning`, `fundingHistory`).
+
+The research behind all of this, including the ten-year funding test, the cross-venue check and the
+market-share-weighted retest with bootstrap intervals, is the artifact "Funding Rate Signal Test"
+(2026-09-16). The leg-based OI heat rule was re-examined rather than changed; see the same note.
+
+**The heat rule test, in short:** a stand-alone port replicates `oi_heat_leg` exactly. At the live 10%
+swing threshold its rank correlation with 90-day returns is −0.12 with an interval spanning zero and
+opposite signs in the two halves of the sample; at 15% it is −0.38 (90% interval −0.57 to −0.15) with
+both halves negative, and at 20% −0.49. The 2× trigger has fired on seven days since mid-2024 at 15%
+and those were followed by gains, so the information is in the continuous ratio, not the danger line.
+Applied later on 2026-09-16 at Raul's request: `CONFIG.oiLegThreshold` is 0.15. The rules version stays
+"2026-09-16" because no verdict had been logged under it between the funding change and this one.
+
+**Provider fallbacks no longer overwrite keyed history (2026-09-16).** The first sync after the
+venue-weighted ingest hit a coinalyze rate limit (the ingest makes about ten calls instead of three),
+fell through to OKX, and OKX's single book replaced 180 days of the aggregate before the signals were
+recomputed. Three guards followed: `withRetry` waits for `Retry-After` or at least 20 s on a 429
+instead of retrying inside three seconds; `ingestOpenInterest` skips the keyless providers once
+coinalyze has ever populated the table, so a failed keyed sync leaves yesterday's history in place and
+logs the error; and the CoinGecko snapshot is refused above 1.5M BTC (it returned 2.98M, which is
+double counting). The 180 rows were repaired by re-running the sync. The ingest also paces itself by
+coinalyze's actual rule (40 calls a minute, each symbol in a history request counting as one) and fetches
+funding, volume and positioning only for markets that have ever carried $20M of open interest, so a daily
+sync spends about two minutes on coinalyze and never depends on a retry.

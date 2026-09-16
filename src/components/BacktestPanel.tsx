@@ -7,6 +7,9 @@ import type { BacktestResponse } from "../services/api";
 import { C, FONT, fmtPct, fmtNum } from "../theme";
 import { Panel, Note, Badge } from "./ui";
 
+/** Signals whose extreme TOP readings are expected to precede losses, not gains. */
+const OVERHEAT = new Set(["oi_heat_leg", "oi_heat_30d", "funding_7d"]);
+
 const LABELS: Record<string, string> = {
   mvrv_z: "MVRV Z-score",
   realized_ratio: "Spot / realized price",
@@ -16,6 +19,8 @@ const LABELS: Record<string, string> = {
   puell: "Puell multiple",
   term_spread_7dma: "sUSDe term spread",
   oi_heat_30d: "OI heat (30d)",
+  oi_heat_leg: "OI heat (leg)",
+  funding_7d: "Funding rate, 7d (BitMEX before 2022)",
   net_liquidity_90d: "Net liquidity 90d",
   stablecoin_30d: "Stablecoin float 30d",
   composite: "Composite score",
@@ -90,10 +95,11 @@ export function BacktestPanel({
 
       {view === "tails" ? (
         <>
-          <p style={{ fontFamily: FONT.sans, fontSize: 12, color: C.textDim, lineHeight: 1.55, margin: "0 0 14px" }}>
+          <p style={{ fontFamily: FONT.ui, fontSize: 12, color: C.textDim, lineHeight: 1.55, margin: "0 0 14px" }}>
             Deciles are the wrong test for a claim like "the most oversold reading on record marks a
             generational low" — that lives entirely in the top or bottom few percent, which a decile
-            average dilutes away. These rows ask the question the reports actually make.
+            average dilutes away. These rows ask the question the reports actually make. Overheat
+            signals are expected to precede losses, so their verdict reads the sign the other way.
           </p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: FONT.mono, fontSize: 12 }}>
@@ -114,7 +120,12 @@ export function BacktestPanel({
                   .filter((t) => t.pctile === 5)
                   .sort((a, b) => (b.med_fwd_180d ?? 0) - (a.med_fwd_180d ?? 0))
                   .map((t) => {
-                    const works = (t.med_fwd_90d ?? 0) > 0 && (t.med_fwd_180d ?? 0) > 0;
+                    // An overheat signal's TOP tail is supposed to precede losses,
+                    // so "works" means negative there and positive everywhere else.
+                    const wantNeg = OVERHEAT.has(t.signal) && t.tail === "top";
+                    const works = wantNeg
+                      ? (t.med_fwd_30d ?? 0) < 0 && (t.med_fwd_90d ?? 0) < 0
+                      : (t.med_fwd_90d ?? 0) > 0 && (t.med_fwd_180d ?? 0) > 0;
                     return (
                       <tr key={`${t.signal}-${t.tail}`} style={{ borderTop: `1px solid ${C.border}` }}>
                         <td style={{ padding: "7px 10px", color: C.text }}>{LABELS[t.signal] ?? t.signal}</td>
@@ -127,7 +138,7 @@ export function BacktestPanel({
                         <td style={{ padding: "7px 10px", textAlign: "right", color: pnl(t.med_fwd_180d) }}>{fmtPct(t.med_fwd_180d)}</td>
                         <td style={{ padding: "7px 10px", textAlign: "right", color: C.textDim }}>{fmtPct(t.hit_rate_90d, 0)}</td>
                         <td style={{ padding: "7px 10px", textAlign: "right" }}>
-                          <Badge color={works ? C.good : C.bad}>{works ? "validated" : "failed"}</Badge>
+                          <Badge color={works ? C.good : C.bad}>{works ? "as expected" : "failed"}</Badge>
                         </td>
                       </tr>
                     );
@@ -149,7 +160,7 @@ export function BacktestPanel({
             return (
               <div key={sig}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                  <span style={{ fontFamily: FONT.sans, fontSize: 12.5, color: C.text }}>{LABELS[sig] ?? sig}</span>
+                  <span style={{ fontFamily: FONT.ui, fontSize: 12.5, color: C.text }}>{LABELS[sig] ?? sig}</span>
                   <span style={{ fontFamily: FONT.mono, fontSize: 11, color: C.textDim }}>
                     spread {fmtNum((hi - lo) * 100, 1)}pp · n={rows.reduce((s, r) => s + r.n, 0)}
                   </span>

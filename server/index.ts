@@ -10,6 +10,7 @@ import { db } from "./db.js";
 import { fullSync } from "./ingest.js";
 import { computeBottomBand, CONFIG, CYCLE_LOWS, OI_HEAT_SPEC } from "./signals.js";
 import { ERAS } from "./backtest.js";
+import { computeQuadrants, describeVerdict, logVerdict } from "./verdict.js";
 import { loadEnv } from "./sources/util.js";
 import {
   PUBLIC_CACHE_CONTROL,
@@ -69,19 +70,41 @@ app.get(
     );
     if (!latest) return res.json({ latest: null, trail: [], bottomBand: null });
 
+    // The regime label carries state (a dead zone), so it is computed over the
+    // whole history and then joined onto the trail the page draws.
+    const scoreRows = q<{ date: string; valuation_score: number | null; leverage_score: number | null }>(
+      "SELECT date, valuation_score, leverage_score FROM signals ORDER BY date"
+    );
+    const quadrants = computeQuadrants(scoreRows);
+    const quadrantByDate = new Map(quadrants.map((r) => [r.date, r]));
+    const verdict = describeVerdict(quadrants);
+
     // The quadrant trail: valuation on x, leverage on y, most recent last.
-    const trail = q<{ date: string; valuation_score: number; leverage_score: number; price: number }>(
-      `SELECT date, valuation_score, leverage_score, price
+    const trail = q<{
+      date: string; valuation_score: number; leverage_score: number;
+      macro_score: number | null; composite: number | null; price: number;
+    }>(
+      `SELECT date, valuation_score, leverage_score, macro_score, composite, price
        FROM signals
        WHERE valuation_score IS NOT NULL
        ORDER BY date DESC LIMIT ?`,
       trailDays
-    ).reverse();
+    )
+      .reverse()
+      .map((r) => {
+        const qr = quadrantByDate.get(r.date);
+        return {
+          ...r,
+          quadrant: qr?.quadrant ?? null,
+          valuation_smooth: qr?.valuation_smooth ?? null,
+          leverage_smooth: qr?.leverage_smooth ?? null,
+        };
+      });
 
     const realizedPrice = Number(latest.realized_price ?? 0);
     const bottomBand = realizedPrice > 0 ? computeBottomBand(realizedPrice) : null;
 
-    res.json({ latest, trail, bottomBand, cycleLows: CYCLE_LOWS });
+    res.json({ latest, trail, bottomBand, cycleLows: CYCLE_LOWS, verdict });
   })
 );
 
@@ -110,7 +133,8 @@ app.get(
       `SELECT s.date, s.price, s.oi_heat_leg, s.oi_leg_start, s.oi_leg_price_chg, s.oi_leg_oi_chg,
               s.oi_heat_7d, s.oi_heat_14d, s.oi_heat_30d,
               s.oi_heat_pct, s.oi_mcap_ratio, s.funding_rate, s.leverage_score,
-              o.oi_usd, o.oi_coins, o.source
+              s.funding_7d, s.taker_buy_7d, s.long_share_7d, s.long_share_chg30,
+              o.oi_usd, o.oi_coins, o.source, o.funding_simple, o.taker_buy, o.volume_usd, o.n_venues
        FROM signals s JOIN open_interest o ON o.date = s.date
        ORDER BY s.date`
     );
@@ -147,8 +171,30 @@ app.get(
       };
     });
 
+    // Per-venue funding on the latest day, the positioning labels, and how far back
+    // the funding history reaches once BitMEX is spliced in.
+    const venuesDate = q1<{ d: string | null }>("SELECT MAX(date) AS d FROM funding_venues")?.d ?? null;
+    const venues = venuesDate
+      ? q(
+          `SELECT symbol, exchange, funding_8h, oi_usd, volume_usd, oi_share, vol_share, weight
+           FROM funding_venues WHERE date = ? ORDER BY oi_share DESC`,
+          venuesDate
+        )
+      : [];
+    const positioning =
+      q1(
+        `SELECT date, long_share_7d, long_share_chg30 FROM signals
+         WHERE long_share_7d IS NOT NULL ORDER BY date DESC LIMIT 1`
+      ) ?? null;
+    const fundingHistory =
+      q1<{ first: string | null; n: number }>("SELECT MIN(date) AS first, COUNT(*) AS n FROM funding_bitmex") ?? null;
+
     // The UI needs to know when the panel is under-powered rather than silent.
     res.json({
+      venues,
+      venuesDate,
+      positioning,
+      fundingHistory,
       series,
       coverage,
       spec: OI_HEAT_SPEC,
@@ -245,13 +291,78 @@ app.get(
         "signals",
       ].map((t) => [t, (q1<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`)?.c ?? 0)])
     );
+    // Latest row per raw table, so the page can date each source on its own
+    // instead of hiding a nine-day-old curve behind one "as of" line.
+    const freshness = Object.fromEntries(
+      [
+        "btc_metrics",
+        "tradfi_prices",
+        "macro_series",
+        "open_interest",
+        "stablecoin_supply",
+        "term_structure",
+        "signals",
+        "funding_venues",
+        "funding_bitmex",
+        "positioning",
+      ].map((t) => [t, q1<{ d: string | null }>(`SELECT MAX(date) AS d FROM ${t}`)?.d ?? null])
+    );
     res.json({
       counts,
+      freshness,
       latestDate: q1<{ d: string }>("SELECT MAX(date) AS d FROM signals")?.d ?? null,
       config: CONFIG,
       recentSyncs: q(
         "SELECT ts, source, records, status, error FROM sync_log ORDER BY id DESC LIMIT 25"
       ),
+    });
+  })
+);
+
+// ── VERDICT LOG ────────────────────────────────────────────────────────────
+// What the page said each day, joined to what BTC then did. Rows are written
+// by logVerdict() once per as-of date and never rewritten.
+
+app.get(
+  "/api/verdicts",
+  route((_req, res) => {
+    const rows = q<Record<string, number | string | null>>(
+      `SELECT v.*, s.fwd_30d, s.fwd_90d, s.fwd_180d
+       FROM verdict_log v LEFT JOIN signals s ON s.date = v.signal_date
+       ORDER BY v.signal_date DESC LIMIT 400`
+    );
+    const med = (arr: (number | null)[]) => {
+      const s = arr.filter((v): v is number => v != null).sort((a, b) => a - b);
+      return s.length ? s[s.length >> 1] : null;
+    };
+    const summary = (["acc", "knife", "trend", "danger"] as const)
+      .map((k) => {
+        const rs = rows.filter((r) => r.quadrant === k);
+        const f90 = rs.map((r) => r.fwd_90d as number | null).filter((v): v is number => v != null);
+        return {
+          quadrant: k,
+          n: rs.length,
+          n_90d: f90.length,
+          med_fwd_30d: med(rs.map((r) => r.fwd_30d as number | null)),
+          med_fwd_90d: med(f90),
+          med_fwd_180d: med(rs.map((r) => r.fwd_180d as number | null)),
+          hit_rate_90d: f90.length ? f90.filter((v) => v > 0).length / f90.length : null,
+        };
+      })
+      .filter((s) => s.n > 0);
+    const span = q1<{ since: string | null; count: number }>(
+      "SELECT MIN(signal_date) AS since, COUNT(*) AS count FROM verdict_log"
+    );
+    const latest = q1<{ date: string; price: number }>(
+      "SELECT date, price FROM signals ORDER BY date DESC LIMIT 1"
+    );
+    res.json({
+      rows,
+      count: span?.count ?? 0,
+      since: span?.since ?? null,
+      latestDate: latest?.date ?? null,
+      latestPrice: latest?.price ?? null,
+      summary,
     });
   })
 );
@@ -300,6 +411,15 @@ cron.schedule("30 6 * * *", async () => {
     syncing = false;
   }
 }, { timezone: "UTC" });
+
+// Capture the current verdict at startup as well as after each sync, so a day
+// is recorded even when the morning sync fails. Idempotent per as-of date.
+try {
+  const logged = logVerdict();
+  if (logged) console.log(`[verdict] ${logged.date}: ${logged.inserted ? "logged" : "already logged"}`);
+} catch (err) {
+  console.error("[verdict] log failed:", err);
+}
 
 // Bind loopback only. Public access is served by the Cloudflare tunnel,
 // which connects from this same host to localhost:3002. This removes direct

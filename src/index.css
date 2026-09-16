@@ -1,4 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* House style, dark mode. Tokens mirror src/theme.ts — change both together. */
+/* No @import: the mono stack is locally installed, so nothing is fetched. */
+
+:root {
+  --ground: #0c1322;
+  --surface: #141d31;
+  --surface-alt: #101827;
+  --hairline: #25324a;
+  --hairline-bright: #33425e;
+  --ink: #e9edf5;
+  --body: #c3cbd9;
+  --muted: #98a3b8;
+  --blue: #7fa6ff;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "Roboto Mono", ui-monospace,
+    SFMono-Regular, Menlo, monospace;
+}
 
 * {
   box-sizing: border-box;
@@ -13,30 +28,165 @@ body,
 }
 
 body {
-  background: #0a0e14;
-  color: #e6edf3;
+  background: var(--ground);
+  color: var(--body);
+  font-family: var(--mono);
   -webkit-font-smoothing: antialiased;
+  /* Numbers must not jitter when a value refreshes. */
+  font-variant-numeric: tabular-nums;
 }
+
+/* No page chrome by design: no frame, no edge stripes, no header/footer bars.
+   Structure comes from whitespace, hairline card borders, and the
+   eyebrow -> title -> "as of" rhythm. A rule running partway along an edge
+   reads as a page that failed to finish loading. */
 
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0d141d;
+  background: var(--surface-alt);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3949;
+  background: var(--hairline);
   border-radius: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a4b5e;
+  background: var(--hairline-bright);
 }
 
+button {
+  font-family: var(--mono);
+}
 button:hover {
-  border-color: #3a4b5e !important;
+  border-color: var(--hairline-bright) !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 table {
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Daily view (2026-09-12) ─────────────────────────────────────────────── */
+
+/* Disclosures: the explanatory prose lives behind these, closed by default. */
+details.disc {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0 18px;
+}
+details.disc > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+details.disc > summary::-webkit-details-marker {
+  display: none;
+}
+details.disc > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  color: var(--blue);
+}
+details.disc[open] > summary::before {
+  content: "▾";
+}
+details.disc > .disc-body {
+  padding: 0 0 16px 14px;
+  color: var(--body);
+  max-width: 82ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+details.disc .disc-body p {
+  margin: 0 0 8px;
+}
+details.disc .disc-body ul {
+  margin: 0;
+  padding-left: 18px;
+}
+details.disc .disc-body li {
+  margin: 0 0 6px;
+}
+
+/* Segmented control (trail length). */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.seg button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+  background: rgba(127, 166, 255, 0.14);
+  color: var(--blue);
+  font-weight: 700;
+}
+
+/* Layout grids for the daily view; inline styles cannot carry media queries. */
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.8fr);
+  gap: 24px;
+  align-items: start;
+}
+.spot-block {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+.axes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.map-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+.cycle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 18px;
+}
+@media (max-width: 860px) {
+  .hero-grid,
+  .axes-grid,
+  .map-grid {
+    grid-template-columns: 1fr;
+  }
+  .spot-block {
+    justify-items: start;
+    text-align: left;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

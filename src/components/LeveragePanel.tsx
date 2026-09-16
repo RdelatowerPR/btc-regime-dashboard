@@ -3,6 +3,11 @@
 //
 // The definition here is transcribed from the source episode rather than
 // reconstructed — see OI_HEAT_SPEC in server/signals.ts.
+//
+// 2026-09-16: funding is displayed in its stored unit (percent per 8 hours; the
+// tab used to multiply it by 100 a second time). The venue weighting behind the
+// number, and the positioning data the sync collects, stay off this page: the
+// tab shows the reading, the research note carries the analysis.
 
 import {
   ComposedChart,
@@ -20,6 +25,27 @@ import {
 import type { LeverageResponse } from "../services/api";
 import { C, FONT, fmtNum, fmtPct, fmtUsd } from "../theme";
 import { Panel, Metric, MetricGrid, Note, Evidence, Badge, tooltipStyle, tooltipFormatter } from "./ui";
+
+// Funding is stored in PERCENT PER 8 HOURS (coinalyze's convention). 0.01 is the
+// exchanges' neutral rate; the words follow the ten-year bands behind fundingLevelScore.
+const fmtFunding = (f: number | null | undefined) => (f == null ? "—" : `${f.toFixed(4)}%`);
+const annualised = (f: number | null | undefined) => (f == null ? "—" : `${(f * 3 * 365).toFixed(1)}%`);
+const fundingWord = (f: number | null | undefined) =>
+  f == null
+    ? "—"
+    : f >= 0.08
+      ? "extreme"
+      : f >= 0.04
+        ? "hot"
+        : f >= 0.02
+          ? "warning"
+          : f >= 0.01
+            ? "above neutral"
+            : f >= 0
+              ? "neutral"
+              : "shorts paying";
+const fundingColor = (f: number | null | undefined) =>
+  f == null ? C.textFaint : f >= 0.04 ? C.bad : f >= 0.02 ? C.warn : f < 0 ? C.good : C.text;
 
 export function LeveragePanel({ data }: { data: LeverageResponse }) {
   const latest = data.series.at(-1);
@@ -49,7 +75,7 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
         <div style={{ borderLeft: `2px solid ${C.accent}`, paddingLeft: 12, marginBottom: 18 }}>
           <div
             style={{
-              fontFamily: FONT.sans,
+              fontFamily: FONT.ui,
               fontSize: 13,
               color: C.text,
               lineHeight: 1.6,
@@ -66,7 +92,7 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
           </div>
           <div
             style={{
-              fontFamily: FONT.sans,
+              fontFamily: FONT.ui,
               fontSize: 12,
               color: C.textDim,
               marginTop: 10,
@@ -117,9 +143,10 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
           <Metric label="OI / market cap" value={fmtPct(latest.oi_mcap_ratio, 2)} />
           <Metric
             label="Funding"
-            value={latest.funding_rate == null ? "—" : fmtPct(latest.funding_rate, 3)}
-            sub="confirms OI direction"
-            color={(latest.funding_rate ?? 0) > 0.01 ? C.warn : C.text}
+            value={fmtFunding(latest.funding_rate)}
+            sub={`per 8h · ≈ ${annualised(latest.funding_rate)} a year · ${fundingWord(latest.funding_rate)}`}
+            color={fundingColor(latest.funding_rate)}
+            title="What leveraged longs pay shorts, weighted across venues by the money behind each. 0.01% per 8h is the exchanges' neutral rate; above 0.04 has preceded losses over ten years."
           />
         </MetricGrid>
       )}
@@ -133,20 +160,20 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
       <div style={{ height: 300, marginTop: 22 }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data.series} margin={{ top: 6, right: 46, bottom: 4, left: 6 }}>
-            <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+            <CartesianGrid stroke={C.grid} />
             <XAxis dataKey="date" minTickGap={60} stroke={C.textFaint}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
             {/* allowDataOverflow is required: without it Recharts treats the
                 domain as a hint and stretches it to fit outliers, which both
                 buries the 2x/3x lines and produces unrounded tick labels. */}
             <YAxis yAxisId="heat" domain={[-3, 5]} allowDataOverflow
               ticks={[-3, -2, -1, 0, 1, 2, 3, 4, 5]} stroke={C.textFaint}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }}
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }}
               label={{ value: "OI heat (leg)", angle: -90, position: "insideLeft",
                 style: { fontSize: 10, fontFamily: FONT.mono, fill: C.textDim } }} />
             <YAxis yAxisId="px" orientation="right" stroke={C.textFaint}
               tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
             <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
               formatter={tooltipFormatter((v, n) => [n === "BTC" ? fmtUsd(v) : fmtNum(v, 2), n])} />
             <Legend wrapperStyle={{ fontFamily: FONT.mono, fontSize: 11 }} />
@@ -209,19 +236,40 @@ export function LeveragePanel({ data }: { data: LeverageResponse }) {
             </table>
           </div>
 
-          {t2 && t3 && (
-            <Evidence>
-              <b style={{ color: C.good }}>The stated thresholds validate — but only at ~30 days.</b>{" "}
-              Readings at or above 2× were followed by a median{" "}
-              <b style={{ color: C.bad }}>{fmtPct(t2.aboveMed30d)}</b> over the next month against{" "}
-              <b style={{ color: C.good }}>{fmtPct(t2.belowMed30d)}</b> below 2×, and at 3× the
-              median falls to <b style={{ color: C.bad }}>{fmtPct(t3.aboveMed30d)}</b>. By 90 days
-              the effect has washed out entirely — which matches how it is framed on air ("maybe
-              lighten up", "wait a little bit for it to come off"). It is a tactical positioning
-              signal with a horizon of weeks, not a directional call, and the dashboard scores it
-              that way.
-            </Evidence>
-          )}
+          {t2 && t3 && (() => {
+            // The sentence follows the live numbers. A hard-coded "washes out by
+            // 90 days" once sat beside a table showing a 16pp gap at 90 days.
+            const gap30 = (t2.belowMed30d ?? 0) - (t2.aboveMed30d ?? 0);
+            const gap90 = (t2.belowMed90d ?? 0) - (t2.aboveMed90d ?? 0);
+            const validates = gap30 > 0.02;
+            const persists = gap90 > 0.02;
+            return (
+              <Evidence>
+                <b style={{ color: validates ? C.good : C.warn }}>
+                  {validates
+                    ? "The stated thresholds validate at 30 days."
+                    : "The stated thresholds do not separate at 30 days on this data."}
+                </b>{" "}
+                Readings at or above 2× were followed by a median{" "}
+                <b style={{ color: C.bad }}>{fmtPct(t2.aboveMed30d)}</b> over the next month against{" "}
+                <b style={{ color: C.good }}>{fmtPct(t2.belowMed30d)}</b> below 2×, and at 3× the
+                median is <b style={{ color: C.bad }}>{fmtPct(t3.aboveMed30d)}</b>.{" "}
+                {persists ? (
+                  <>
+                    At 90 days the gap is still {fmtNum(gap90 * 100, 0)}pp ({fmtPct(t2.aboveMed90d)} against{" "}
+                    {fmtPct(t2.belowMed90d)}), so on the current history it reads as more than a
+                    weeks-long positioning signal.
+                  </>
+                ) : (
+                  <>
+                    By 90 days the gap has closed ({fmtPct(t2.aboveMed90d)} against {fmtPct(t2.belowMed90d)}),
+                    which matches how it is framed on air: a tactical signal with a horizon of weeks.
+                  </>
+                )}{" "}
+                These figures are recomputed on every sync and this wording follows them.
+              </Evidence>
+            );
+          })()}
           <Evidence>
             Small samples ({t3?.n} days above 3×) clustered into a handful of episodes.
             Directionally consistent, not statistically proven.
@@ -244,7 +292,7 @@ function heatColor(v: number | null | undefined) {
   if (v == null) return C.textFaint;
   if (v >= 3) return C.bad;
   if (v >= 2) return C.warn;
-  if (v >= 1) return "#e3915a";
+  if (v >= 1) return C.badMid;
   if (v < 0) return C.info;
   return C.good;
 }

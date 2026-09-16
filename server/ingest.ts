@@ -8,9 +8,11 @@ import { ingestYahoo } from "./sources/yahoo.js";
 import { ingestFred } from "./sources/fred.js";
 import { ingestStablecoins } from "./sources/stablecoins.js";
 import { ingestOpenInterest } from "./sources/openinterest.js";
+import { ingestBitmexFunding } from "./sources/bitmex.js";
 import { ingestTermStructure } from "./sources/termstructure.js";
 import { computeSignals } from "./signals.js";
 import { runBacktest } from "./backtest.js";
+import { logVerdict } from "./verdict.js";
 
 export async function fullSync() {
   loadEnv();
@@ -27,10 +29,15 @@ export async function fullSync() {
   await ingestFred();
   await ingestStablecoins();
   await ingestOpenInterest();
+  await ingestBitmexFunding(); // long-history funding for calibration and the Evidence tab
   await ingestTermStructure();
 
   computeSignals();
   runBacktest();
+
+  // Record what the page will say for this as-of date. Once per date, never rewritten.
+  const logged = logVerdict();
+  if (logged) console.log(`Verdict ${logged.date}: ${logged.inserted ? "logged" : "already logged"}`);
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`\nSync complete in ${elapsed}s.`);

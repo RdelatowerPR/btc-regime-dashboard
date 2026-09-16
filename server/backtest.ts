@@ -52,6 +52,7 @@ const DECILE_SIGNALS = [
   { key: "puell", label: "Puell multiple" },
   { key: "term_spread_7dma", label: "sUSDe term spread" },
   { key: "oi_heat_leg", label: "OI heat (rally leg)" },
+  { key: "funding_7d", label: "Funding rate 7d (weighted; BitMEX pre-2022)" },
   { key: "net_liquidity_90d", label: "Net liquidity 90d chg" },
   { key: "stablecoin_30d", label: "Stablecoin float 30d chg" },
   { key: "composite", label: "Composite score" },
@@ -203,6 +204,7 @@ const TAIL_SIGNALS = [
   { key: "mayer", tail: "bot" as const, label: "Mayer multiple" },
   { key: "puell", tail: "bot" as const, label: "Puell multiple" },
   { key: "oi_heat_leg", tail: "top" as const, label: "OI heat (leg)" },
+  { key: "funding_7d", tail: "top" as const, label: "Funding rate 7d" },
   { key: "composite", tail: "top" as const, label: "Composite score" },
 ];
 

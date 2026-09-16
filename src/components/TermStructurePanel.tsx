@@ -19,9 +19,9 @@ import { Panel, Metric, MetricGrid, Evidence, Badge, tooltipStyle, tooltipFormat
 
 const REGIME_COLOR: Record<string, string> = {
   STEEP_CONTANGO: C.good,
-  CONTANGO: "#7bc96f",
+  CONTANGO: C.goodMid,
   FLAT: C.textDim,
-  BACKWARDATION: "#e3915a",
+  BACKWARDATION: C.badMid,
   STEEP_BACKWARDATION: C.bad,
   SINGLE_MATURITY: C.textFaint,
 };
@@ -68,15 +68,15 @@ export function TermStructurePanel({ data }: { data: TermStructureResponse }) {
       <div style={{ height: 300, marginTop: 20 }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={withSpread} margin={{ top: 6, right: 46, bottom: 4, left: 6 }}>
-            <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+            <CartesianGrid stroke={C.grid} />
             <XAxis dataKey="date" minTickGap={60} stroke={C.textFaint}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
             <YAxis yAxisId="sp" stroke={C.textFaint}
               tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
             <YAxis yAxisId="px" orientation="right" stroke={C.textFaint}
               tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
-              tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+              tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
             <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
               formatter={tooltipFormatter((v, n) => [n === "BTC" ? fmtUsd(v) : fmtPct(v, 2), n])} />
             <Legend wrapperStyle={{ fontFamily: FONT.mono, fontSize: 11 }} />

@@ -36,7 +36,11 @@ export const CONFIG = {
   // computeOiHeat below.
   oiHeatMinPriceMove: 0.01,
   // Reversal threshold for the rally-leg detector (see OI_HEAT_SPEC).
-  oiLegThreshold: 0.1,
+  // 0.15 since 2026-09-16 (was 0.10). A leg ends on a 15% reversal. At 10% the legs were short
+  // and the ratio noisy: rank correlation with 90-day returns −0.12 with an interval spanning
+  // zero and opposite signs before and after mid-2024. At 15% it is −0.38 [−0.57, −0.15] with
+  // both halves negative. Tested in the research note "Funding Rate Signal Test", section 10.
+  oiLegThreshold: 0.15,
 };
 
 /**
@@ -151,6 +155,49 @@ export function computeBottomBand(realizedPrice: number) {
     observations: n,
     caveat: `Extrapolated from ${n} historical cycle lows; 2σ prediction interval.`,
   };
+}
+
+/** Trailing mean over the last `window` entries, ignoring nulls; null until `minCount` values exist. */
+function trailingMean(series: (number | null)[], window: number, minCount = 2): (number | null)[] {
+  const out: (number | null)[] = new Array(series.length).fill(null);
+  for (let i = 0; i < series.length; i++) {
+    const w = series.slice(Math.max(0, i - window + 1), i + 1).filter((v): v is number => v != null && Number.isFinite(v));
+    if (w.length >= minCount) out[i] = w.reduce((a, b) => a + b, 0) / w.length;
+  }
+  return out;
+}
+
+/**
+ * Funding on a FIXED ten-year scale instead of a percentile of its own short history.
+ *
+ * Calibrated on BitMEX 2018-2026 (the venue that WAS the market until 2020) and the
+ * venue-weighted aggregate since 2022: funding carried information only in its tail,
+ * and inside 2022-2026 alone the percentile had the WRONG sign, because that window
+ * never saw a real extreme. Median forward returns behind the points, 2018 onward:
+ *
+ *   7d mean (% per 8h)   30d      90d     180d      days
+ *   negative             +3.2%    +3.5%   +20.7%    948   shorts paying: mildly supportive
+ *   0 to 0.01            +1.5%    +5.4%   +16.2%  1,429   at or under the exchanges' neutral rate
+ *   0.01 to 0.02         -2.2%    -0.9%   +13.6%    482
+ *   0.02 to 0.04         -2.0%    -3.0%    +2.3%    166
+ *   0.04 to 0.08         -2.8%   -12.4%   -13.5%    116
+ *   0.08 and above      -18.0%   -27.4%   -32.7%     38
+ *
+ * Score points: -0.02 -> -50, 0 -> 0, 0.01 -> 0, 0.02 -> +25, 0.04 -> +60, 0.08 -> +100,
+ * linear between, clamped. Funding CHANGE is deliberately not scored: over the same
+ * ten years every definition of it had a rank correlation within ±0.04 of zero.
+ */
+export function fundingLevelScore(f: number | null): number | null {
+  if (f == null || !Number.isFinite(f)) return null;
+  const pts: [number, number][] = [[-0.02, -50], [0, 0], [0.01, 0], [0.02, 25], [0.04, 60], [0.08, 100]];
+  if (f <= pts[0][0]) return pts[0][1];
+  if (f >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+  for (let k = 0; k < pts.length - 1; k++) {
+    const [x0, y0] = pts[k];
+    const [x1, y1] = pts[k + 1];
+    if (f >= x0 && f <= x1) return y0 + ((y1 - y0) * (f - x0)) / (x1 - x0);
+  }
+  return null;
 }
 
 // ── ROW TYPES ──────────────────────────────────────────────────────────────
@@ -380,17 +427,28 @@ export function computeSignals() {
   // ── Panel 2: leverage & overheat ──────────────────────────────────────────
 
   const oiRows = db
-    .prepare("SELECT date, oi_usd, oi_coins, funding_rate FROM open_interest ORDER BY date")
-    .all() as { date: string; oi_usd: number | null; oi_coins: number | null; funding_rate: number | null }[];
+    .prepare("SELECT date, oi_usd, oi_coins, funding_rate, taker_buy FROM open_interest ORDER BY date")
+    .all() as { date: string; oi_usd: number | null; oi_coins: number | null; funding_rate: number | null; taker_buy: number | null }[];
 
   const oiCoins = new Map<string, number>();
   const oiUsd = new Map<string, number>();
   const funding = new Map<string, number>();
+  const takerBuy = new Map<string, number>();
   for (const r of oiRows) {
     if (r.oi_coins != null) oiCoins.set(r.date, r.oi_coins);
     if (r.oi_usd != null) oiUsd.set(r.date, r.oi_usd);
     if (r.funding_rate != null) funding.set(r.date, r.funding_rate);
+    if (r.taker_buy != null) takerBuy.set(r.date, r.taker_buy);
   }
+  // Long-history funding (BitMEX, 2016+) and the OI-weighted account long share.
+  const bitmexFunding = new Map<string, number>(
+    (db.prepare("SELECT date, funding_8h FROM funding_bitmex WHERE funding_8h IS NOT NULL").all() as { date: string; funding_8h: number }[])
+      .map((r) => [r.date, r.funding_8h])
+  );
+  const longShare = new Map<string, number>(
+    (db.prepare("SELECT date, long_share FROM positioning WHERE long_share IS NOT NULL").all() as { date: string; long_share: number }[])
+      .map((r) => [r.date, r.long_share])
+  );
 
   const heat = Object.fromEntries(
     CONFIG.oiHeatWindows.map((w) => [w, computeOiHeat(dates, oiCoins, priceByDate, w)])
@@ -463,7 +521,18 @@ export function computeSignals() {
 
   const pctOiMcap = expandingPercentile(oiMcapRatio, 60);
   const fundingSeries = dates.map((d) => funding.get(d) ?? null);
-  const pctFunding = expandingPercentile(fundingSeries, 60);
+  // Funding enters the leverage score on a FIXED ten-year scale (fundingLevelScore), as the
+  // 7-day mean of the venue-weighted rate. Percentiles of a 2022+ history had the wrong sign.
+  const funding7d = trailingMean(fundingSeries, 7);
+  // Long-history funding for the Evidence tab: the weighted aggregate where it exists,
+  // BitMEX (the market until 2020) before it. Same units, % per 8h.
+  const fundingSpliced = dates.map((d) => funding.get(d) ?? bitmexFunding.get(d) ?? null);
+  const funding7dLong = trailingMean(fundingSpliced, 7);
+  const takerBuy7d = trailingMean(dates.map((d) => takerBuy.get(d) ?? null), 7);
+  const longShare7d = trailingMean(dates.map((d) => longShare.get(d) ?? null), 7);
+  const longShareChg30 = longShare7d.map((v, i) =>
+    v != null && i >= 30 && longShare7d[i - 30] != null ? v - (longShare7d[i - 30] as number) : null
+  );
 
   const pctNetLiq = expandingPercentile(netLiq90d, CONFIG.minSample);
   const pctHy = expandingPercentile(dates.map((d) => hyOas.get(d) ?? null), CONFIG.minSample);
@@ -510,7 +579,7 @@ export function computeSignals() {
     const leverageScore = meanOf([
       pctToScore(heatPct[i]),
       pctToScore(pctOiMcap[i]),
-      pctToScore(pctFunding[i]),
+      fundingLevelScore(funding7d[i]),
     ]);
 
     // Macro: positive = liquidity tailwind. Wider credit spreads, a stronger
@@ -565,6 +634,10 @@ export function computeSignals() {
       oiHeatPct: heatPct[i],
       oiMcapRatio: oiMcapRatio[i],
       fundingRate: fundingSeries[i],
+      funding7d: funding7dLong[i],
+      takerBuy7d: takerBuy7d[i],
+      longShare7d: longShare7d[i],
+      longShareChg30: longShareChg30[i],
       termSpread7dma: term?.term_spread_7dma ?? null,
       termRegime: term?.regime ?? null,
       netLiquidity: netLiquidity[i],
@@ -593,6 +666,7 @@ export function computeSignals() {
       term_spread_7dma, term_regime,
       net_liquidity, net_liquidity_90d, hy_oas, dxy, real_10y, stablecoin_30d,
       valuation_score, leverage_score, macro_score, composite,
+      funding_7d, taker_buy_7d, long_share_7d, long_share_chg30,
       fwd_30d, fwd_90d, fwd_180d
     ) VALUES (
       @date, @price, @realizedPrice, @realizedRatio, @mvrv, @mvrvZ, @mvrvPct,
@@ -602,6 +676,7 @@ export function computeSignals() {
       @termSpread7dma, @termRegime,
       @netLiquidity, @netLiquidity90d, @hyOas, @dxy, @real10y, @stablecoin30d,
       @valuationScore, @leverageScore, @macroScore, @composite,
+      @funding7d, @takerBuy7d, @longShare7d, @longShareChg30,
       @fwd30d, @fwd90d, @fwd180d
     )
     ON CONFLICT(date) DO UPDATE SET
@@ -622,6 +697,8 @@ export function computeSignals() {
       stablecoin_30d=excluded.stablecoin_30d,
       valuation_score=excluded.valuation_score, leverage_score=excluded.leverage_score,
       macro_score=excluded.macro_score, composite=excluded.composite,
+      funding_7d=excluded.funding_7d, taker_buy_7d=excluded.taker_buy_7d,
+      long_share_7d=excluded.long_share_7d, long_share_chg30=excluded.long_share_chg30,
       fwd_30d=excluded.fwd_30d, fwd_90d=excluded.fwd_90d, fwd_180d=excluded.fwd_180d
   `);
 

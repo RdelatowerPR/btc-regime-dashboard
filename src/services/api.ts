@@ -36,6 +36,10 @@ export interface SignalRow {
   leverage_score: number | null;
   macro_score: number | null;
   composite: number | null;
+  funding_7d?: number | null;
+  taker_buy_7d?: number | null;
+  long_share_7d?: number | null;
+  long_share_chg30?: number | null;
 }
 
 export interface BottomBand {
@@ -47,11 +51,93 @@ export interface BottomBand {
   caveat: string;
 }
 
+export type QuadrantKey = "acc" | "knife" | "trend" | "danger";
+
+export interface TrailRow {
+  date: string;
+  valuation_score: number;
+  leverage_score: number;
+  macro_score: number | null;
+  composite: number | null;
+  price: number;
+  /** Regime label with its dead zone applied (server/verdict.ts); null before enough history. */
+  quadrant: QuadrantKey | null;
+  valuation_smooth: number | null;
+  leverage_smooth: number | null;
+}
+
+export interface Verdict {
+  date: string;
+  quadrant: QuadrantKey;
+  name: string;
+  tag: string;
+  tone: "good" | "warn" | "info" | "bad";
+  strength: "faint" | "moderate" | "strong";
+  depth: number;
+  valuation_smooth: number;
+  leverage_smooth: number;
+  runStart: string;
+  daysInQuadrant: number;
+  enteredFrom: QuadrantKey | null;
+  enteredHow: "valuation" | "leverage" | "both" | null;
+  rules: { version: string; smoothDays: number; band: number };
+}
+
 export interface RegimeResponse {
   latest: SignalRow | null;
-  trail: { date: string; valuation_score: number; leverage_score: number; price: number }[];
+  trail: TrailRow[];
   bottomBand: BottomBand | null;
   cycleLows: { date: string; discount: number }[];
+  verdict: Verdict | null;
+}
+
+/** One row per as-of date, written once and never rewritten. Forward returns join from `signals`. */
+export interface VerdictLogRow {
+  signal_date: string;
+  logged_at: string;
+  rules_version: string;
+  quadrant: QuadrantKey;
+  strength: "faint" | "moderate" | "strong";
+  depth: number;
+  days_in_quadrant: number;
+  run_start: string;
+  entered_from: QuadrantKey | null;
+  price: number;
+  valuation_score: number | null;
+  leverage_score: number | null;
+  macro_score: number | null;
+  composite: number | null;
+  valuation_smooth: number | null;
+  leverage_smooth: number | null;
+  realized_price: number | null;
+  mvrv_z: number | null;
+  drawdown: number | null;
+  oi_heat_leg: number | null;
+  funding_rate: number | null;
+  term_regime: string | null;
+  band_low: number | null;
+  band_mid: number | null;
+  band_high: number | null;
+  fwd_30d: number | null;
+  fwd_90d: number | null;
+  fwd_180d: number | null;
+}
+
+export interface VerdictsResponse {
+  rows: VerdictLogRow[];
+  count: number;
+  since: string | null;
+  latestDate: string | null;
+  latestPrice: number | null;
+  summary: {
+    quadrant: QuadrantKey;
+    n: number;
+    n_90d: number;
+    med_fwd_30d: number | null;
+    med_fwd_90d: number | null;
+    med_fwd_180d: number | null;
+    hit_rate_90d: number | null;
+  }[];
 }
 
 export interface BucketRow {
@@ -108,8 +194,33 @@ export interface OiThreshold {
   belowMed90d: number | null;
 }
 
+export interface VenueRow {
+  symbol: string;
+  exchange: string;
+  funding_8h: number | null;
+  oi_usd: number | null;
+  volume_usd: number | null;
+  oi_share: number | null;
+  vol_share: number | null;
+  weight: number | null;
+}
+
 export interface LeverageResponse {
-  series: (SignalRow & { oi_usd: number; oi_coins: number; source: string })[];
+  series: (SignalRow & {
+    oi_usd: number;
+    oi_coins: number;
+    source: string;
+    funding_simple?: number | null;
+    taker_buy?: number | null;
+    volume_usd?: number | null;
+    n_venues?: number | null;
+  })[];
+  /** Per-venue funding, open interest and volume shares on the latest day. */
+  venues: VenueRow[];
+  venuesDate: string | null;
+  /** OI-weighted account long share (Binance, Bybit), 7-day mean and 30-day change. Labels, not scored. */
+  positioning: { date: string; long_share_7d: number | null; long_share_chg30: number | null } | null;
+  fundingHistory: { first: string | null; n: number } | null;
   coverage: { n: number; first: string; last: string; source: string } | null;
   spec: OiHeatSpec | null;
   thresholds: OiThreshold[];
@@ -139,6 +250,8 @@ export interface TermStructureResponse {
 
 export interface StatsResponse {
   counts: Record<string, number>;
+  /** MAX(date) per raw table, so each source can be dated on its own. */
+  freshness: Record<string, string | null>;
   latestDate: string | null;
   config: Record<string, unknown>;
   recentSyncs: { ts: string; source: string; records: number; status: string; error: string | null }[];
@@ -150,7 +263,8 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const fetchRegime = (trail = 90) => get<RegimeResponse>(`/api/regime?trail=${trail}`);
+export const fetchRegime = (trail = 365) => get<RegimeResponse>(`/api/regime?trail=${trail}`);
+export const fetchVerdicts = () => get<VerdictsResponse>("/api/verdicts");
 export const fetchCycle = (from = "2017-01-01") =>
   get<{ series: SignalRow[] }>(`/api/cycle?from=${from}`);
 export const fetchLeverage = () => get<LeverageResponse>("/api/leverage");

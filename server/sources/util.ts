@@ -31,19 +31,37 @@ export async function fetchJSON<T>(url: string, headers: Record<string, string> 
   const res = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": UA, ...headers },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} for ${url.split("?")[0]}`);
+  if (!res.ok) throw httpError(res, url);
   return res.json() as Promise<T>;
+}
+
+export type HttpError = Error & { status?: number; retryAfterMs?: number };
+
+/** An Error carrying the status and any Retry-After, so withRetry can wait sensibly on 429. */
+function httpError(res: Response, url: string): HttpError {
+  const err = new Error(`HTTP ${res.status} ${res.statusText} for ${url.split("?")[0]}`) as HttpError;
+  err.status = res.status;
+  const retryAfter = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfterMs = retryAfter * 1000;
+  return err;
 }
 
 export async function fetchText(url: string, headers: Record<string, string> = {}): Promise<string> {
   const res = await fetch(url, { headers: { "User-Agent": UA, ...headers } });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} for ${url.split("?")[0]}`);
+  if (!res.ok) throw httpError(res, url);
   return res.text();
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Retry with exponential backoff. Rate limits and transient 5xx are common. */
+/**
+ * Retry with exponential backoff. Rate limits and transient 5xx are common.
+ *
+ * A 429 is different from a flaky 5xx: the limit is per minute, so three retries
+ * inside three seconds only confirm it (which is how a coinalyze sync fell through
+ * to the fallback providers on 2026-09-16). On 429 wait for the server's
+ * Retry-After, or at least 20 s, then 40 s.
+ */
 export async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseMs = 800): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -51,7 +69,12 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseMs = 
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (i < attempts - 1) await sleep(baseMs * 2 ** i);
+      if (i < attempts - 1) {
+        const e = err as HttpError;
+        const wait = e?.status === 429 ? Math.max(e.retryAfterMs ?? 0, 20000 * (i + 1)) : baseMs * 2 ** i;
+        if (e?.status === 429) console.log(`    rate limited; waiting ${Math.round(wait / 1000)}s before retry ${i + 2}/${attempts}`);
+        await sleep(wait);
+      }
     }
   }
   throw lastErr;

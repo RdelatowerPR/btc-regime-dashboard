@@ -192,9 +192,91 @@ CREATE TABLE IF NOT EXISTS sync_log (
   error   TEXT
 );
 
+-- What the front page said each day. Written once per as-of date by
+-- server/verdict.ts and never rewritten, so the regime calls can be scored
+-- against what BTC did next (join signals.fwd_* on signal_date). The signals
+-- table cannot serve as this record: it is recomputed on every sync.
+CREATE TABLE IF NOT EXISTS verdict_log (
+  signal_date      TEXT PRIMARY KEY,
+  logged_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+  rules_version    TEXT,
+  quadrant         TEXT,           -- acc | knife | trend | danger
+  strength         TEXT,           -- faint | moderate | strong
+  depth            REAL,
+  days_in_quadrant INTEGER,
+  run_start        TEXT,
+  entered_from     TEXT,
+  price            REAL,
+  valuation_score  REAL,
+  leverage_score   REAL,
+  macro_score      REAL,
+  composite        REAL,
+  valuation_smooth REAL,
+  leverage_smooth  REAL,
+  realized_price   REAL,
+  mvrv_z           REAL,
+  drawdown         REAL,
+  oi_heat_leg      REAL,
+  funding_rate     REAL,
+  term_regime      TEXT,
+  band_low         REAL,           -- projected cycle-low zone as printed that day
+  band_mid         REAL,
+  band_high        REAL
+);
+
+-- Per-venue funding, open interest and volume, one row per venue-day (2026-09-16).
+-- funding_8h is the venue's rate in percent per 8 hours (hourly venues normalised x8);
+-- weight is the smaller of the venue's OI share and volume share, renormalised, and
+-- zero for books under $50M of open interest. See sources/openinterest.ts.
+CREATE TABLE IF NOT EXISTS funding_venues (
+  date           TEXT NOT NULL,
+  symbol         TEXT NOT NULL,
+  exchange       TEXT,
+  funding_8h     REAL,
+  oi_usd         REAL,
+  volume_usd     REAL,
+  buy_volume_usd REAL,
+  oi_share       REAL,
+  vol_share      REAL,
+  weight         REAL,
+  PRIMARY KEY (date, symbol)
+);
+
+-- BitMEX XBTUSD funding, daily mean of the 8h prints in percent per 8 hours, 2016 onward.
+-- History and calibration only (BitMEX was the market until 2020; it is ~0.04% of OI now).
+CREATE TABLE IF NOT EXISTS funding_bitmex (
+  date       TEXT PRIMARY KEY,
+  funding_8h REAL,
+  prints     INTEGER
+);
+
+-- Account long share, weighted by open interest across the venues that report it.
+CREATE TABLE IF NOT EXISTS positioning (
+  date       TEXT PRIMARY KEY,
+  long_share REAL,
+  n_venues   INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_tradfi_symbol ON tradfi_prices(symbol, date);
 CREATE INDEX IF NOT EXISTS idx_macro_series  ON macro_series(series_id, date);
 `);
+
+// ── MIGRATIONS ──────────────────────────────────────────────────────────────
+// Columns added after the tables were created. CREATE TABLE IF NOT EXISTS does
+// not add columns to an existing table, so each is checked and added here.
+
+function ensureColumn(table: string, column: string, type: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+ensureColumn("open_interest", "funding_simple", "REAL"); // the old equal-weight eight-venue mean
+ensureColumn("open_interest", "volume_usd", "REAL");     // dollar volume across weighted venues
+ensureColumn("open_interest", "taker_buy", "REAL");      // taker buy share of that volume
+ensureColumn("open_interest", "n_venues", "INTEGER");
+ensureColumn("signals", "funding_7d", "REAL");           // weighted funding, BitMEX before 2022, 7d mean
+ensureColumn("signals", "taker_buy_7d", "REAL");
+ensureColumn("signals", "long_share_7d", "REAL");
+ensureColumn("signals", "long_share_chg30", "REAL");
 
 // ── PREPARED STATEMENTS ─────────────────────────────────────────────────────
 
@@ -218,12 +300,37 @@ export const upsertMacro = db.prepare(`
 `);
 
 export const upsertOpenInterest = db.prepare(`
-  INSERT INTO open_interest (date, oi_usd, oi_coins, funding_rate, source)
-  VALUES (@date, @oiUsd, @oiCoins, @fundingRate, @source)
+  INSERT INTO open_interest (date, oi_usd, oi_coins, funding_rate, source, funding_simple, volume_usd, taker_buy, n_venues)
+  VALUES (@date, @oiUsd, @oiCoins, @fundingRate, @source, @fundingSimple, @volumeUsd, @takerBuy, @nVenues)
   ON CONFLICT(date) DO UPDATE SET
     oi_usd=excluded.oi_usd, oi_coins=excluded.oi_coins,
     funding_rate=COALESCE(excluded.funding_rate, open_interest.funding_rate),
-    source=excluded.source
+    source=excluded.source,
+    funding_simple=COALESCE(excluded.funding_simple, open_interest.funding_simple),
+    volume_usd=COALESCE(excluded.volume_usd, open_interest.volume_usd),
+    taker_buy=COALESCE(excluded.taker_buy, open_interest.taker_buy),
+    n_venues=COALESCE(excluded.n_venues, open_interest.n_venues)
+`);
+
+export const upsertFundingVenue = db.prepare(`
+  INSERT INTO funding_venues
+    (date, symbol, exchange, funding_8h, oi_usd, volume_usd, buy_volume_usd, oi_share, vol_share, weight)
+  VALUES
+    (@date, @symbol, @exchange, @funding8h, @oiUsd, @volumeUsd, @buyVolumeUsd, @oiShare, @volShare, @weight)
+  ON CONFLICT(date, symbol) DO UPDATE SET
+    exchange=excluded.exchange, funding_8h=excluded.funding_8h, oi_usd=excluded.oi_usd,
+    volume_usd=excluded.volume_usd, buy_volume_usd=excluded.buy_volume_usd,
+    oi_share=excluded.oi_share, vol_share=excluded.vol_share, weight=excluded.weight
+`);
+
+export const upsertFundingBitmex = db.prepare(`
+  INSERT INTO funding_bitmex (date, funding_8h, prints) VALUES (@date, @funding8h, @prints)
+  ON CONFLICT(date) DO UPDATE SET funding_8h=excluded.funding_8h, prints=excluded.prints
+`);
+
+export const upsertPositioning = db.prepare(`
+  INSERT INTO positioning (date, long_share, n_venues) VALUES (@date, @longShare, @nVenues)
+  ON CONFLICT(date) DO UPDATE SET long_share=excluded.long_share, n_venues=excluded.n_venues
 `);
 
 export const upsertStablecoin = db.prepare(`

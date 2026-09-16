@@ -56,12 +56,12 @@ export function CyclePanel({
         <div style={{ height: 300 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={series} margin={{ top: 6, right: 10, bottom: 4, left: 6 }}>
-              <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+              <CartesianGrid stroke={C.grid} />
               <XAxis dataKey="date" tickFormatter={yearTick} minTickGap={60} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis scale="log" domain={["auto", "auto"]} stroke={C.textFaint}
                 tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <Tooltip
                 contentStyle={tooltipStyle}
                 labelStyle={{ color: C.textDim }}
@@ -131,11 +131,11 @@ export function CyclePanel({
         <div style={{ height: 260 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={series} margin={{ top: 6, right: 10, bottom: 4, left: 6 }}>
-              <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+              <CartesianGrid stroke={C.grid} />
               <XAxis dataKey="date" tickFormatter={yearTick} minTickGap={60} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis domain={[0, 100]} ticks={[0, 30, 50, 70, 100]} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
                 formatter={tooltipFormatter((v, n) => [fmtNum(v, 1), n])} />
               <Legend wrapperStyle={{ fontFamily: FONT.mono, fontSize: 11 }} />
@@ -186,11 +186,11 @@ export function CyclePanel({
         <div style={{ height: 220 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={series} margin={{ top: 6, right: 10, bottom: 4, left: 6 }}>
-              <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+              <CartesianGrid stroke={C.grid} />
               <XAxis dataKey="date" tickFormatter={yearTick} minTickGap={60} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis stroke={C.textFaint} tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
                 formatter={tooltipFormatter((v) => [fmtPct(v), "drawdown"])} />
               <ReferenceLine y={-0.5} stroke={C.warn} strokeDasharray="3 3"

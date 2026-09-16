@@ -70,15 +70,15 @@ export function MacroPanel({ series, buckets }: { series: SignalRow[]; buckets: 
         <div style={{ height: 280, marginTop: 20 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={series} margin={{ top: 6, right: 46, bottom: 4, left: 6 }}>
-              <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+              <CartesianGrid stroke={C.grid} />
               <XAxis dataKey="date" tickFormatter={yearTick} minTickGap={60} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis yAxisId="nl" stroke={C.textFaint}
                 tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}T`}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis yAxisId="px" orientation="right" scale="log" domain={["auto", "auto"]} stroke={C.textFaint}
                 tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
                 formatter={tooltipFormatter((v, n) => [n === "BTC" ? fmtUsd(v) : `$${(v / 1000).toFixed(2)}T`, n])} />
               <Legend wrapperStyle={{ fontFamily: FONT.mono, fontSize: 11 }} />
@@ -125,13 +125,13 @@ export function MacroPanel({ series, buckets }: { series: SignalRow[]; buckets: 
         <div style={{ height: 250, marginTop: 20 }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={series} margin={{ top: 6, right: 46, bottom: 4, left: 6 }}>
-              <CartesianGrid stroke={C.grid} strokeDasharray="2 4" />
+              <CartesianGrid stroke={C.grid} />
               <XAxis dataKey="date" tickFormatter={yearTick} minTickGap={60} stroke={C.textFaint}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis yAxisId="pct" stroke={C.textFaint} tickFormatter={(v: number) => `${v.toFixed(0)}%`}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <YAxis yAxisId="dxy" orientation="right" stroke={C.textFaint} domain={["auto", "auto"]}
-                tick={{ fontSize: 10.5, fontFamily: FONT.mono, fill: C.textFaint }} />
+                tick={{ fontSize: 11, fontFamily: FONT.mono, fill: C.textFaint }} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: C.textDim }}
                 formatter={tooltipFormatter((v, n) => [fmtNum(v), n])} />
               <Legend wrapperStyle={{ fontFamily: FONT.mono, fontSize: 11 }} />
